@@ -3033,9 +3033,10 @@ void MlOptimiserCuda::doThreadExpectationSomeParticles(int thread_id)
 		DEBUG_HANDLE_ERROR(cudaSetDevice(device_id));
 	//std::cerr << " calling on device " << device_id << std::endl;
 	//put mweight allocation here
-	size_t first_ipart = 0, last_ipart = 0;
+	size_t first_ipart = 0;
+	size_t last_ipart = baseMLO->exp_my_last_ori_particle - baseMLO->exp_my_first_ori_particle;
 
-	while (baseMLO->exp_ipart_ThreadTaskDistributor->getTasks(first_ipart, last_ipart))
+	if (first_ipart <= last_ipart)
 	{
 		CTIC(timer,"oneTask");
 		for (long unsigned ipart = first_ipart; ipart <= last_ipart; ipart++)

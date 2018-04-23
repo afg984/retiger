@@ -40,6 +40,7 @@
 #include <iostream>
 #include <string>
 #include <fstream>
+#include <assert.h>
 #include "src/macros.h"
 #include "src/error.h"
 #include "src/ml_optimiser.h"
@@ -327,6 +328,7 @@ void MlOptimiser::parseContinue(int argc, char **argv)
 
 	x_pool = textToInteger(parser.getOption("--pool", "Number of images to pool for each thread task", "1"));
 	nr_threads = textToInteger(parser.getOption("--j", "Number of threads to run in parallel (only useful on multi-core machines)", "1"));
+	assert(nr_threads == 1);
 	do_parallel_disc_io = !parser.checkOption("--no_parallel_disc_io", "Do NOT let parallel (MPI) processes access the disc simultaneously (use this option with NFS)");
 	combine_weights_thru_disc = !parser.checkOption("--dont_combine_weights_via_disc", "Send the large arrays of summed weights through the MPI network, instead of writing large files to disc");
 	do_shifts_onthefly = parser.checkOption("--onthefly_shifts", "Calculate shifted images on-the-fly, do not store precalculated ones in memory");
@@ -3000,9 +3002,8 @@ void MlOptimiser::expectationSomeParticles(long int my_first_ori_particle, long 
 	std::cerr << " exp_nr_images= " << exp_nr_images << std::endl;
 #endif
 
-	exp_ipart_ThreadTaskDistributor->resize(my_last_ori_particle - my_first_ori_particle + 1, 1);
-	exp_ipart_ThreadTaskDistributor->reset();
-    global_ThreadManager->run(globalThreadExpectationSomeParticles);
+	assert(this->cudaOptimisers.size() == 1);
+	((MlOptimiserCuda*) this->cudaOptimisers[0])->doThreadExpectationSomeParticles(0);
 
     if (threadException != NULL)
     	throw *threadException;
