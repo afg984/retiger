@@ -18,6 +18,9 @@
  * author citations must be preserved.
  ***************************************************************************/
 
+#ifdef NDEBUG
+#undef NDEBUG
+#endif
 //#define DEBUG
 //#define DEBUG_CHECKSIZES
 //#define DEBUG_BODIES
