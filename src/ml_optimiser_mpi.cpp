@@ -38,6 +38,7 @@ struct CachingPartioner {
 
 	CachingPartioner(int nworkers): nworkers(nworkers), known(nworkers), self_remaining(nworkers) {}
 
+	// int JOB_FIRST_to_index_in_completed_array(int first) const {
     int index(int first) const {
         return (first - this->first_particle) / chunk_size;
 	}
@@ -1221,7 +1222,6 @@ void MlOptimiserMpi::expectation()
 				// See which random_halfset this slave belongs to, and keep track of the number of ori_particles that have been processed already
 				if (do_split_random_halves)
 				{
-					//throw "NOT SUPPORTED";
 					random_halfset = (this_slave % 2 == 1) ? 1 : 2;
 					if (random_halfset == 1)
 					{
@@ -1281,6 +1281,12 @@ void MlOptimiserMpi::expectation()
 				// Now send out a new job
 				if (my_nr_subset_particles_done < nr_particles_todo)
 				{
+					if (JOB_FIRST == -1) {
+						printf(
+							"WARNING: partitioner has fewer workloads (done=%d, todo=%d)\n",
+							my_nr_subset_particles_done,
+							nr_particles_todo);
+					}
 					MlOptimiser::getMetaAndImageDataSubset(JOB_FIRST, JOB_LAST, !do_parallel_disc_io);
 					JOB_NIMG = YSIZE(exp_metadata);
 					JOB_LEN_FN_IMG = exp_fn_img.length() + 1; // +1 to include \0 at the end of the string
@@ -1289,6 +1295,11 @@ void MlOptimiserMpi::expectation()
 				}
 				else
 				{
+					if (JOB_FIRST != -1) {
+						printf(
+							"WARNING: partitioner has more workloads (JOB_FIRST=%d)\n",
+							JOB_FIRST);
+					}
 					// There are no more particles in the list
 					JOB_FIRST = -1;
 					JOB_LAST = -1;
