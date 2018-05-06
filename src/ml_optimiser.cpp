@@ -40,6 +40,7 @@
 #include <iostream>
 #include <string>
 #include <fstream>
+#include <mpi.h>
 #include "src/macros.h"
 #include "src/error.h"
 #include "src/ml_optimiser.h"
@@ -48,6 +49,42 @@
 #endif
 
 #define NR_CLASS_MUTEXES 5
+
+// AFGAFGAFG
+class CachingReader {
+	typedef Image<RFLOAT> img_t;
+	typedef std::map<FileName, img_t> map_t;
+	size_t misses;
+	size_t hits;
+	std::map<FileName, img_t> cache;
+	void copy(const img_t& from, img_t& to) {
+		to().reshape(from());
+		FOR_ALL_DIRECT_ELEMENTS_IN_MULTIDIMARRAY(from()) {
+			DIRECT_MULTIDIM_ELEM(to(), n) = (RFLOAT)DIRECT_MULTIDIM_ELEM(from(), n);
+		}
+	}
+public:
+	CachingReader(): misses(0), hits(0) {}
+	void report() {
+		int rank;
+		MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+		printf("[cache] rank %d=pid%d hits/misses %lu/%lu\n", rank, getpid(), hits, misses);
+	}
+	void readFromOpenFile_n1_false(img_t& out, const FileName &name, fImageHandler &hFile) {
+		map_t::iterator it = cache.find(name);
+		if (it == cache.end()) {
+			std::pair<map_t::iterator, bool> p = cache.insert(std::make_pair(name, img_t()));
+			it = p.first;
+			it->second.readFromOpenFile(name, hFile, -1, false);
+			++ misses;
+		} else {
+			++ hits;
+		}
+		this->copy(it->second, out);
+		out().setXmippOrigin();
+	}
+};
+CachingReader cr;
 
 //Some global threads management variables
 static pthread_mutex_t global_mutex2[NR_CLASS_MUTEXES] = { PTHREAD_MUTEX_INITIALIZER };
@@ -1847,8 +1884,9 @@ void MlOptimiser::calculateSumOfPowerSpectraAndAverageImage(MultidimArray<RFLOAT
 					hFile.openFile(fn_stack, WRITE_READONLY);
 					fn_open_stack = fn_stack;
 				}
-				img.readFromOpenFile(fn_img, hFile, -1, false);
-                img().setXmippOrigin();
+				cr.readFromOpenFile_n1_false(img, fn_img, hFile); //cr.report();
+				// img.readFromOpenFile(fn_img, hFile, -1, false); printf("readFromOpenFile(%s) called from L1850\n", fn_img.c_str());
+                // img().setXmippOrigin();
             }
 
 			// May24,2015 - Shaoda & Sjors, Helical refinement
@@ -2374,7 +2412,6 @@ void MlOptimiser::expectation()
 #ifdef DEBUG_EXP
 	std::cerr << "Entering expectation" << std::endl;
 #endif
-
 	// Initialise some stuff
 	// A. Update current size (may have been changed to ori_size in autoAdjustAngularSampling) and resolution pointers
 	updateImageSizeAndResolutionPointers();
@@ -2663,7 +2700,6 @@ void MlOptimiser::expectationSetup()
 #ifdef DEBUG
 	std::cerr << "Entering expectationSetup" << std::endl;
 #endif
-
 	// Re-initialise the random seed, because with a noisy_mask, inside the previous iteration different timings of different MPI nodes may have given rise to different number of calls to ran1
 	// Use the iteration number so that each iteration has a different random seed
 	init_random_generator(random_seed + iter);
@@ -2984,8 +3020,9 @@ void MlOptimiser::expectationSomeParticles(long int my_first_ori_particle, long 
 					fn_open_stack = fn_stack;
 				}
 			    Image<RFLOAT> img;
-				img.readFromOpenFile(fn_img, hFile, -1, false);
-				img().setXmippOrigin();
+				cr.readFromOpenFile_n1_false(img, fn_img, hFile); getpid();
+				// img.readFromOpenFile(fn_img, hFile, -1, false);  printf("readFromOpenFile(%s) called from L2987\n", fn_img.c_str());
+				// img().setXmippOrigin();
 				exp_imgs.push_back(img());
 
 			} // end loop over all particles of this ori_particle
@@ -2993,7 +3030,6 @@ void MlOptimiser::expectationSomeParticles(long int my_first_ori_particle, long 
 		} // end if do_parallel_disc_io
 
 	} //end loop over ori_part_id
-
 
 #ifdef DEBUG_EXPSOME
 	std::cerr << " exp_my_first_ori_particle= " << exp_my_first_ori_particle << " exp_my_last_ori_particle= " << exp_my_last_ori_particle << std::endl;
@@ -3006,6 +3042,8 @@ void MlOptimiser::expectationSomeParticles(long int my_first_ori_particle, long 
 
     if (threadException != NULL)
     	throw *threadException;
+
+	cr.report();
 
 #ifdef TIMING
     timer.toc(TIMING_ESP);
@@ -8281,7 +8319,7 @@ void MlOptimiser::getMetaAndImageDataSubset(int first_ori_particle_id, int last_
 						hFile.openFile(fn_stack, WRITE_READONLY);
 						fn_open_stack = fn_stack;
 					}
-					img.readFromOpenFile(fn_img, hFile, -1, false);
+					img.readFromOpenFile(fn_img, hFile, -1, false);  printf("readFromOpenFile(%s) called from L8284\n", fn_img.c_str());
 					img().setXmippOrigin();
 				}
 				if (XSIZE(img()) != XSIZE(exp_imagedata) || YSIZE(img()) != YSIZE(exp_imagedata) )

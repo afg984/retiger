@@ -26,6 +26,80 @@
 #include <stdlib.h>
 
 
+struct CachingPartioner {
+    int nworkers;
+    int first_particle;
+    int last_particle;
+    int chunk_size;
+    int ri;
+    std::vector<int> completed_array;
+    std::vector< std::set<int> > known;
+    std::vector< std::deque<int> > self_remaining;
+
+	CachingPartioner(int nworkers): nworkers(nworkers), known(nworkers), self_remaining(nworkers) {}
+
+    int index(int first) const {
+        return (first - this->first_particle) / chunk_size;
+	}
+
+    int& is_completed(int first) {
+        return this->completed_array[this->index(first)];
+    }
+
+    void setup_workload(int first, int last, int chunk) {
+        this->first_particle = first;
+        this->last_particle = last;
+        this->chunk_size = chunk;
+        this->completed_array.clear();
+        this->completed_array.resize((last + chunk - first) / chunk);
+		ri = this->completed_array.size() - 1;
+        for (int i = 0; i < nworkers; ++ i) {
+            std::deque<int>& remaining = this->self_remaining[i];
+            remaining = std::deque<int>(this->known[i].begin(), this->known[i].end());
+        }
+    }
+
+    int _allocate(int rank) {
+        std::deque<int>& remaining = this->self_remaining[rank - 1];
+        while (not remaining.empty()) {
+            int front = remaining.front();
+            remaining.pop_front();
+            if (not is_completed(front)) {
+                is_completed(front) = 1;
+				//printf("rank %d allocated %d front %d size\n", rank, front, remaining.size());
+                return front;
+            }
+        }
+        for (; ri >= 0; -- ri) {
+            if (not this->completed_array[ri]) {
+                this->completed_array[ri] = 1;
+				//printf("rank %d allocated %d chunk %d size\n", rank, this->first_particle + this->chunk_size * ri, remaining.size());
+                return this->first_particle + this->chunk_size * ri;
+            }
+        }
+        return -1;
+    }
+	int allocate(int rank) {
+		int r = _allocate(rank);
+		if(r!=-1) {
+			known[rank - 1].insert(r);
+		}
+		//printf("rank %d allocated %d\n", rank, r);
+		return r;
+    }
+	int allocate_split(int rank) {
+		int half_rank = (rank+1)/2;
+		int r = _allocate(half_rank);
+		if(r!=-1) {
+			known[half_rank-1].insert(r);
+		}
+		//printf("rank %d allocated %d\n", rank, r);
+		return r;
+    }
+};
+CachingPartioner cp(0);
+CachingPartioner cp2(0);
+
 //#define PRINT_GPU_MEM_INFO
 
 //#define DEBUG
@@ -83,6 +157,15 @@ void MlOptimiserMpi::finalise()
 
 void MlOptimiserMpi::initialise()
 {
+
+	// AFGAFGAFGAFG
+	if(do_split_random_halves){
+		cp = CachingPartioner(node->size/2+1);
+		cp2 = CachingPartioner(node->size/2+1);
+	}
+	else{
+		cp = CachingPartioner(node->size);
+	}
 
 #ifdef DEBUG
     std::cerr<<"MlOptimiserMpi::initialise Entering"<<std::endl;
@@ -718,7 +801,6 @@ void MlOptimiserMpi::expectation()
 #ifdef DEBUG
 	std::cerr << "MlOptimiserMpi::expectation: Entering " << std::endl;
 #endif
-
 	MultidimArray<long int> first_last_nr_images(6);
 	MultidimArray<RFLOAT> metadata;
 	int first_slave = 1;
@@ -1096,6 +1178,15 @@ void MlOptimiserMpi::expectation()
 			long int nr_subset_particles_done_halfset2 = 0;
 			long int my_nr_subset_particles_done = 0;
 
+			// AFGAFGAFG
+			if (do_split_random_halves){
+				cp.setup_workload(my_subset_first_ori_particle_halfset1, my_subset_last_ori_particle_halfset1, nr_pool);
+				cp2.setup_workload(my_subset_first_ori_particle_halfset2, my_subset_last_ori_particle_halfset2, nr_pool);
+			}
+			else{
+				cp.setup_workload(my_subset_first_ori_particle, my_subset_last_ori_particle, nr_pool);
+			}
+
 			while (nr_slaves_done < node->size - 1)
 			{
 				// Receive a job request from a slave
@@ -1130,6 +1221,7 @@ void MlOptimiserMpi::expectation()
 				// See which random_halfset this slave belongs to, and keep track of the number of ori_particles that have been processed already
 				if (do_split_random_halves)
 				{
+					//throw "NOT SUPPORTED";
 					random_halfset = (this_slave % 2 == 1) ? 1 : 2;
 					if (random_halfset == 1)
 					{
@@ -1139,8 +1231,17 @@ void MlOptimiserMpi::expectation()
 							nr_particles_todo = my_subset_last_ori_particle_halfset1 - my_subset_first_ori_particle_halfset1 + 1;
 						//else
 						//	nr_particles_todo = (mydata.numberOfOriginalParticles(random_halfset));
-						JOB_FIRST = nr_ori_particles_done_halfset1;
-						JOB_LAST  = XMIPP_MIN(my_subset_last_ori_particle_halfset1, JOB_FIRST + nr_pool - 1);
+
+						// following two lines exist in original code
+						//JOB_FIRST = nr_ori_particles_done_halfset1;
+						//JOB_LAST  = XMIPP_MIN(my_subset_last_ori_particle_halfset1, JOB_FIRST + nr_pool - 1);
+
+						JOB_FIRST = cp.allocate_split(this_slave);
+						if (JOB_FIRST == -1) {
+							JOB_LAST = -2;
+						} else {
+							JOB_LAST  = XMIPP_MIN(my_subset_last_ori_particle_halfset1, JOB_FIRST + nr_pool - 1);
+						}
 					}
 					else
 					{
@@ -1150,8 +1251,17 @@ void MlOptimiserMpi::expectation()
 							nr_particles_todo = my_subset_last_ori_particle_halfset2 - my_subset_first_ori_particle_halfset2 + 1;
 						//else
 						//	nr_particles_todo = (mydata.numberOfOriginalParticles(random_halfset));
-						JOB_FIRST = mydata.numberOfOriginalParticles(1) + nr_ori_particles_done_halfset2;
-						JOB_LAST  = XMIPP_MIN(my_subset_last_ori_particle_halfset2, JOB_FIRST + nr_pool - 1);
+
+						// following two lines exist in original code
+						//JOB_FIRST = mydata.numberOfOriginalParticles(1) + nr_ori_particles_done_halfset2;
+						//JOB_LAST  = XMIPP_MIN(my_subset_last_ori_particle_halfset2, JOB_FIRST + nr_pool - 1);
+
+						JOB_FIRST = cp2.allocate_split(this_slave);
+						if (JOB_FIRST == -1) {
+							JOB_LAST = -2;
+						} else {
+							JOB_LAST  = XMIPP_MIN(my_subset_last_ori_particle_halfset2, JOB_FIRST + nr_pool - 1);
+						}
 					}
 				}
 				else
@@ -1159,8 +1269,13 @@ void MlOptimiserMpi::expectation()
 					random_halfset = 0;
 					my_nr_subset_particles_done = nr_subset_particles_done;
 					nr_particles_todo =  my_subset_last_ori_particle - my_subset_first_ori_particle + 1;
-					JOB_FIRST = nr_ori_particles_done;
-					JOB_LAST  = XMIPP_MIN(my_subset_last_ori_particle, JOB_FIRST + nr_pool - 1);
+					// JOB_FIRST = nr_ori_particles_done;
+					JOB_FIRST = cp.allocate(this_slave);
+					if (JOB_FIRST == -1) {
+						JOB_LAST = -2;
+					} else {
+						JOB_LAST  = XMIPP_MIN(my_subset_last_ori_particle, JOB_FIRST + nr_pool - 1);
+					}
 				}
 
 				// Now send out a new job
@@ -1489,7 +1604,6 @@ void MlOptimiserMpi::expectation()
 		for (int iclass = 0; iclass < mymodel.nr_classes; iclass++)
 			mymodel.PPref[iclass].initialiseData(0);
 	}
-
 
 #ifdef DEBUG
 	std::cerr << "MlOptimiserMpi::expectation: done" << std::endl;

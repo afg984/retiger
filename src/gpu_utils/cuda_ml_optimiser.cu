@@ -3228,7 +3228,7 @@ void MlOptimiserCuda::doThreadExpectationSomeParticles(int thread_id)
 								if (failsafe_attempts == 10)
 									std::cerr << "NOTE: No more fail-safe warnings will be issued." << std::endl;
 							}
-
+							std::cerr << "ATTEMPS ++ !!!!!!!!!!!!!!!!!!!!" << std::endl;
 							failsafe_attempts ++;
 						}
 					}
