@@ -44,7 +44,6 @@
 #include <string>
 #include <fstream>
 #include <assert.h>
-#include <mpi.h>
 #include "src/macros.h"
 #include "src/error.h"
 #include "src/ml_optimiser.h"
@@ -53,42 +52,6 @@
 #endif
 
 #define NR_CLASS_MUTEXES 5
-
-// AFGAFGAFG
-class CachingReader {
-	typedef Image<RFLOAT> img_t;
-	typedef std::map<FileName, img_t> map_t;
-	size_t misses;
-	size_t hits;
-	std::map<FileName, img_t> cache;
-	void copy(const img_t& from, img_t& to) {
-		to().reshape(from());
-		FOR_ALL_DIRECT_ELEMENTS_IN_MULTIDIMARRAY(from()) {
-			DIRECT_MULTIDIM_ELEM(to(), n) = (RFLOAT)DIRECT_MULTIDIM_ELEM(from(), n);
-		}
-	}
-public:
-	CachingReader(): misses(0), hits(0) {}
-	void report() {
-		int rank;
-		MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-		printf("[cache] rank %d=pid%d hits/misses %lu/%lu\n", rank, getpid(), hits, misses);
-	}
-	void readFromOpenFile_n1_false(img_t& out, const FileName &name, fImageHandler &hFile) {
-		map_t::iterator it = cache.find(name);
-		if (it == cache.end()) {
-			std::pair<map_t::iterator, bool> p = cache.insert(std::make_pair(name, img_t()));
-			it = p.first;
-			it->second.readFromOpenFile(name, hFile, -1, false);
-			++ misses;
-		} else {
-			++ hits;
-		}
-		this->copy(it->second, out);
-		out().setXmippOrigin();
-	}
-};
-CachingReader cr;
 
 //Some global threads management variables
 static pthread_mutex_t global_mutex2[NR_CLASS_MUTEXES] = { PTHREAD_MUTEX_INITIALIZER };
@@ -3046,8 +3009,6 @@ void MlOptimiser::expectationSomeParticles(long int my_first_ori_particle, long 
 
     if (threadException != NULL)
     	throw *threadException;
-
-	cr.report();
 
 #ifdef TIMING
     timer.toc(TIMING_ESP);

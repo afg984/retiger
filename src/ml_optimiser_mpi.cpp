@@ -2996,6 +2996,7 @@ void MlOptimiserMpi::iterate()
 				checkConvergence(node->rank == 1);
 
 			expectation();
+			cr.report();
 
 			int old_verb = verb;
 			if (nr_subsets > 1) // be quiet
